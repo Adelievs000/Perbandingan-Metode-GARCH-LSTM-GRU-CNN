@@ -1,0 +1,632 @@
+---
+title: "SYNTAX GARCH KURS TERBARU"
+output: html_document
+date: "2025-02-06"
+---
+
+
+```{r message=FALSE, warning=FALSE}
+library(readxl)
+library(lmtest)
+library(forecast)
+library(tseries)
+library(TTR)
+library("graphics")
+library("TSA")
+library(aTSA)
+library(FinTS)
+library(fGarch)
+library(rugarch)
+library(tibble)
+library(janitor)
+library(imputeTS)
+```
+
+```{r}
+setwd("D:\\S2 Statistika dan Sains Data\\Tesis\\Persyntax an\\SYNTAX TESIS")
+```
+
+# FULL KURS
+
+```{r}
+#import data
+kurs<-read.csv("Kurs Terbaru.csv",header=T,sep=';')
+CPO<-read.csv("CPO Terbaru.csv",header=T,sep = ';')
+kurs
+CPO
+```
+
+
+## Definisi Variabel
+
+```{r}
+library(xts)
+kurs$Tanggal.Kurs <- as.Date(kurs$Tanggal.Kurs)
+kurs <- as.xts(kurs [, -1], order.by = kurs$Tanggal.Kurs)
+```
+
+```{r}
+head(kurs)
+```
+
+```{r}
+plot(ts(kurs),main="")
+```
+
+
+## Eksplorasi Data
+```{r}
+summary(kurs)
+```
+
+```{r}
+kurs <- ts(kurs)
+
+par(mfrow=c(2,2))
+ts.plot(kurs, col="black", xlab = "(c)")
+points(kurs, pch = 20, col = "black")
+```
+Berdasarkan time series plot tersebut terdapat perubahan nilai tengah dan perubahan ragam yang jelas dari waktu ke waktu. Hal ini berarti waktu pengamatan diduga berpengaruh terhadap rata-rata dan ragam dari data. Oleh karena itu, dapat dikatakan bahwa data deret waktu tersebut stasioner dalam rata-rata dan ragam. Penyataan ini dapat didukung melalui uji statistik Augmented Dickey-Fuller (ADF-Test).
+
+```{r}
+#Uji Stasioneritas Augmented Dickey-Fuller
+adf.test(kurs)
+```
+Hipotesis:
+$H_0$ : deret tidak stasioner
+$H_1$ : deret stasioner
+
+Pada hasil output di atas, diperoleh hasil bahwa nilai $p_{value}$ untuk return jual maksimum dan return beli maksimum = 0.01 < $\alpha$ = 0.05. Hal ini berarti $H_0$ ditolak sehingga dapat dikatakan bahwa deret stasioner.
+
+## Stasioner Terhadap Ragam
+```{r}
+lamda3=BoxCox.lambda(kurs);lamda3
+```
+
+## Pembagian Data Latih & Data Uji
+
+```{r}
+#import data
+kurs<-read.csv("Kurs Terbaru.csv",header=T,sep=';')
+kurs
+```
+
+```{r}
+#install.packages("rsample")
+library(rsample)
+library(tidymodels)
+library(tidyverse)
+library(dplyr)
+library(timetk)
+splits.kurs <- initial_time_split(kurs,prop = 0.8)
+
+train.kurs <- training(splits.kurs)
+test.kurs <- testing(splits.kurs)
+
+# Visualise the Splits
+splits.kurs %>% 
+  tk_time_series_cv_plan() %>% 
+  plot_time_series_cv_plan(.date_var = Tanggal.Kurs,
+                           .value = Kurs)
+```
+
+
+```{r}
+summary(train.kurs)
+```
+
+### Membangun Model dari Data Latih
+```{r}
+kurs.tr<-train.kurs[,2]
+```
+
+```{r}
+#identifikasi model MA(q) dengan plot ACF
+par(mfrow=c(2,2))
+acf(kurs.tr, lag.max=30, xlab = "(c)")
+```
+
+```{r}
+#identifikasi model AR(p) dengan plot PACF
+par(mfrow=c(2,2))
+pacf(kurs.tr, lag.max=30,  xlab = "(c)")
+```
+
+```{r}
+auto.arima(kurs.tr)
+```
+
+
+## TEST HETEROSKEDASTISITAS DATA RETURN
+```{r}
+#Return kurs
+for (i in 1:20) {
+  ArchTest <- ArchTest(kurs.tr, lags=i, demean=TRUE)
+  cat("P Value LM Test lag ke", i,"adalah" , ArchTest$p.value, "\n") }
+```
+
+## Pemodelan GARCH SQUARED RETURN KURS FULL
+
+### MODEL GARCH(1,0)
+
+```{r}
+# Model GARCH(1,0)
+
+library(rugarch)
+
+# Load the training and testing data
+kurs.tr <- train.kurs[, 2]
+kurs.ts <- test.kurs[, 2]
+
+# Check the length of the training data
+n_total <- length(kurs.tr)
+cat("Total data length: ", n_total, "\n")
+
+# Define the number of out-of-sample points for fitting
+n_out <- length(kurs.ts)
+cat("Out-sample data length: ", n_out, "\n")
+
+# Define the GARCH(1,0) model
+garch0F <- ugarchspec(mean.model = list(armaOrder = c(0,0), include.mean = FALSE),
+                     variance.model = list(model = "sGARCH", garchOrder = c(1,0)),
+                     distribution.model = "norm")
+
+# Fit the model
+garch0Fa <- ugarchfit(spec = garch0F, data = kurs.tr, out.sample = n_out)
+print(garch0Fa)
+```
+
+
+```{r}
+# MODEL GARCH (1,0)
+# Ensure n.roll is within the bounds of out-sample data
+n_roll <- min(3, n_out)
+
+# Number of steps ahead for the forecast
+n_ahead <- n_out
+
+# Forecast
+fore0.kurs <- ugarchforecast(garch0Fa, n.ahead = n_ahead, n.roll = n_roll)
+print(fore0.kurs)
+
+# Extract conditional variances
+sigma_forecast0F <- sigma(fore0.kurs)
+
+# Calculate MSE for training and testing periods
+sigma_fitted0F <- sigma(garch0Fa)
+mse_train0F <- mean((kurs.tr[1:(n_total - n_out)] - sigma_fitted0F)^2)
+
+# Ensure lengths are consistent
+cat("Length of sigma_fitted: ", length(sigma_fitted0F), "\n")
+cat("Length of sigma_forecast: ", length(sigma_forecast0F), "\n")
+cat("Length of kurs full.tr: ", length(kurs.tr), "\n")
+
+# Assuming the last n_out points are for testing
+kurs.test <- kurs.ts
+cat("Length of kurs full.test: ", length(kurs.test), "\n")
+
+# Calculate MSE for testing
+mse_test0F <- mean((kurs.test - sigma_forecast0F)^2)
+
+cat("MSE Pelatihan: ", mse_train0F, "\n")
+cat("MSE Pengujian: ", mse_test0F, "\n")
+
+# Plot results
+par(mfrow = c(2, 1))
+plot(sigma_fitted0F, type = "l", col = "blue", main = "Varians Kondisional (Pelatihan)", ylab = "Varians", xlab = "Waktu")
+plot(sigma_forecast0F, type = "l", col = "red", main = "Forecast Varians Kondisional (Pengujian)", ylab = "Varians", xlab = "Waktu")
+
+# Optional: Plot actual vs. forecast for the testing period
+plot(kurs.test, type = "l", col = "black", main = "Actual vs Forecasted Squared Returns (Pengujian)", ylab = "Squared Returns", xlab = "Waktu")
+lines(sigma_forecast0F, col = "red")
+legend("topright", legend = c("Actual", "Forecasted"), col = c("black", "red"), lty = 1)
+
+```
+
+```{r}
+length(sigma_fitted0F)
+```
+
+```{r}
+# GARCH (1,0)
+library(rugarch)
+
+# Load the training and testing data
+kurs.tr <- train.kurs[, 2]
+kurs.ts <- test.kurs[, 2]
+
+# Check the length of the training data
+n_total <- length(kurs.tr)
+cat("Total data length: ", n_total, "\n")
+
+# Define the number of out-of-sample points for fitting
+n_out <- length(kurs.ts)
+cat("Out-sample data length: ", n_out, "\n")
+
+# Define the GARCH(1,0) model
+garch0Ff <- ugarchspec(mean.model = list(armaOrder = c(0,0), include.mean = FALSE),
+                     variance.model = list(model = "sGARCH", garchOrder = c(1,0)),
+                     distribution.model = "norm")
+
+# Fit the model using the entire training data
+garch0Faf <- ugarchfit(spec = garch0Ff, data = kurs.tr)
+print(garch0Faf)
+
+# Predict the conditional variances for the training data
+sigma_fitted0Ff <- sigma(garch0Faf)
+
+# Forecast out-of-sample variances
+fore0.kursfull <- ugarchforecast(garch0Faf, n.ahead = n_out)
+sigma_forecast0Ff <- sigma(fore0.kursfull)
+
+# Ensure lengths are consistent
+cat("Length of sigma_fitted: ", length(sigma_fitted0Ff), "\n")
+cat("Length of sigma_forecast: ", length(sigma_forecast0Ff), "\n")
+cat("Length of kurs full.tr: ", length(kurs.tr), "\n")
+
+# Calculate MSE for the training period
+mse_train0Ff <- mean((kurs.tr - sigma_fitted0Ff)^2)
+
+# Calculate MSE for the testing period
+mse_test0Ff <- mean((kurs.ts - sigma_forecast0Ff)^2)
+
+cat("MSE Pelatihan: ", mse_train0Ff, "\n")
+cat("MSE Pengujian: ", mse_test0Ff, "\n")
+
+
+# Plot results
+par(mfrow = c(3, 1))
+plot(sigma_fitted0Ff, type = "l", col = "blue", main = "Varians Kondisional (Pelatihan)", ylab = "Varians", xlab = "Waktu")
+plot(sigma_forecast0Ff, type = "l", col = "red", main = "Forecast Varians Kondisional (Pengujian)", ylab = "Varians", xlab = "Waktu")
+lines(c(rep(NA, length(sigma_fitted0Ff)), sigma_forecast0Ff), col = "red")
+legend("topright", legend = c("Fitted", "Forecasted"), col = c("blue", "red"), lty = 1)
+
+# Optional: Plot actual vs. forecast for the testing period
+plot(kurs.ts, type = "l", col = "black", main = "Actual vs Forecasted Squared Returns (Pengujian)", ylab = "Squared Returns", xlab = "Waktu")
+lines(sigma_forecast0Ff, col = "red")
+legend("topright", legend = c("Actual", "Forecasted"), col = c("black", "red"), lty = 1)
+
+```
+
+```{r}
+length(sigma_fitted0Ff)
+length(sigma_forecast0Ff)
+length(kurs.tr)
+```
+
+```{r}
+#menyimpan nilai fitted dan validasi
+library(foreign)
+fitted.kurs.full<-write.csv(sigma_fitted0Ff,"D:\\S2 Statistika dan Sains Data\\Tesis\\Persyntax an\\SYNTAX TESIS\\fitted.kurs.full.csv")
+forecast.kurs.full<-write.csv(sigma_forecast0Ff,"D:\\S2 Statistika dan Sains Data\\Tesis\\Persyntax an\\SYNTAX TESIS\\forecast.kurs.full.csv")
+actual.train.kurs.full<-write.csv(kurs.tr,"D:\\S2 Statistika dan Sains Data\\Tesis\\Persyntax an\\SYNTAX TESIS\\kurs training.csv")
+actual.test.kurs.full<-write.csv(kurs.ts,"D:\\S2 Statistika dan Sains Data\\Tesis\\Persyntax an\\SYNTAX TESIS\\kurs testing.csv")
+```
+
+### MODEL GARCH (1,1)
+
+```{r}
+## MODEL GARCH (1,1)
+library(rugarch)
+
+# Load the training and testing data
+kurs.tr <- train.kurs[, 2]
+kurs.ts <- test.kurs[, 2]
+
+# Check the length of the training data
+n_total <- length(kurs.tr)
+cat("Total data length: ", n_total, "\n")
+
+# Define the number of out-of-sample points for fitting
+n_out <- length(kurs.ts)
+cat("Out-sample data length: ", n_out, "\n")
+
+# Define the GARCH(1,1) model
+garch1F <- ugarchspec(mean.model = list(armaOrder = c(0,0), include.mean = FALSE),
+                     variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                     distribution.model = "norm")
+
+# Fit the model
+garch1Fa <- ugarchfit(spec = garch1F, data = kurs.tr, out.sample = n_out)
+print(garch1Fa)
+```
+
+```{r}
+# MODEL GARCH (1,1)
+# Ensure n.roll is within the bounds of out-sample data
+n_roll <- min(3, n_out)
+
+# Number of steps ahead for the forecast
+n_ahead <- n_out
+
+# Forecast
+fore1.kurs <- ugarchforecast(garch1Fa, n.ahead = n_ahead, n.roll = n_roll)
+print(fore1.kurs)
+
+# Extract conditional variances
+sigma_forecast1F <- sigma(fore1.kurs)
+
+# Calculate MSE for training and testing periods
+sigma_fitted1F <- sigma(garch1Fa)
+mse_train1F <- mean((kurs.tr[1:(n_total - n_out)] - sigma_fitted1F)^2)
+
+# Ensure lengths are consistent
+cat("Length of sigma_fitted: ", length(sigma_fitted1F), "\n")
+cat("Length of sigma_forecast: ", length(sigma_forecast1F), "\n")
+cat("Length of kurs full.tr: ", length(kurs.tr), "\n")
+
+# Assuming the last n_out points are for testing
+kurs.test <- kurs.ts
+cat("Length of kurs full.test: ", length(kurs.test), "\n")
+
+# Calculate MSE for testing
+mse_test1F <- mean((kurs.test - sigma_forecast1F)^2)
+
+cat("MSE Pelatihan: ", mse_train1F, "\n")
+cat("MSE Pengujian: ", mse_test1F, "\n")
+```
+
+```{r}
+plot(garch1Fa,which='all')
+```
+
+```{r}
+# Mengambil data volatilitas bersyarat dari model GARCH yang dihasilkan
+conditional_volatility <- sigma(garch1Fa)
+
+# Menampilkan volatilitas bersyarat
+print(conditional_volatility)
+```
+
+```{r}
+# Membuat plot volatilitas bersyarat
+plot(conditional_volatility, type = 'l', col = 'blue', 
+     main = "Conditional Volatility (Standard Deviation)",
+     xlab = "Time", ylab = "Volatility")
+```
+
+```{r}
+
+# Plot results
+par(mfrow = c(2, 1))
+plot(sigma_fitted1F, type = "l", col = "blue", main = "Varians Kondisional (Pelatihan)", ylab = "Varians", xlab = "Waktu")
+plot(sigma_forecast1F, type = "l", col = "red", main = "Forecast Varians Kondisional (Pengujian)", ylab = "Varians", xlab = "Waktu")
+
+# Optional: Plot actual vs. forecast for the testing period
+plot(kurs.test, type = "l", col = "black", main = "Actual vs Forecasted Squared Returns (Pengujian)", ylab = "Squared Returns", xlab = "Waktu")
+lines(sigma_forecast1F, col = "red")
+legend("topright", legend = c("Actual", "Forecasted"), col = c("black", "red"), lty = 1)
+```
+
+```{r}
+# Plot tanpa sumbu y
+plot(kurs.ts, type = "l", col = "black", 
+     main = "Actual vs Forecasted Squared Returns (Pengujian)", 
+     ylab = "Squared Returns", xlab = "Waktu", 
+     axes = FALSE)
+
+# Menambahkan sumbu y dan x
+axis(1)  # Menambahkan sumbu x
+axis(2, at = seq(min(kurs.ts) - 0.1, max(kurs.ts) + 0.1, by = 0.1))  # Menambahkan sumbu y dengan rentang yang diperbesar
+
+# Menambahkan grid (opsional)
+grid()
+
+# Menambahkan garis dan legenda
+lines(sigma_forecast1F, col = "red")
+legend("topright", legend = c("Aktual", "Diramalkan"), col = c("black", "red"), lty = 1)
+```
+
+```{r}
+# Muat pustaka yang diperlukan
+library(rugarch)
+
+# Muat data pelatihan dan pengujian
+kurs.tr <- train.kurs[, 2]
+kurs.ts <- test.kurs[, 2]  # Data squared returns
+
+# Definisikan model GARCH(1,1)
+garch1F <- ugarchspec(mean.model = list(armaOrder = c(0,0), include.mean = FALSE),
+                     variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                     distribution.model = "norm")
+
+# Fit model
+garch1Fa <- ugarchfit(spec = garch1F, data = kurs.tr)
+print(garch1Fa)
+
+# Jumlah langkah ke depan untuk ramalan
+n_ahead <- length(kurs.ts)
+
+# Forecast
+fore1.kurs <- ugarchforecast(garch1Fa, n.ahead = n_ahead)
+print(fore1.kurs)
+
+# Ekstrak varians kondisional yang diramalkan
+sigma_forecast1F <- sigma(fore1.kurs)  # Ini memberikan squared forecast
+
+# Pastikan panjang sigma_forecast1F sama dengan panjang kurs.ts
+if (length(sigma_forecast1F) != length(kurs.ts)) {
+  stop("Panjang sigma_forecast1F tidak sama dengan panjang kurs.ts")
+}
+
+# Menentukan rentang sumbu y secara manual
+ylim_min <- min(c(kurs.ts, sigma_forecast1F), na.rm = TRUE)
+ylim_max <- max(c(kurs.ts, sigma_forecast1F), na.rm = TRUE)
+
+# Plot hasil
+par(mfrow = c(1, 1))
+
+plot(kurs.ts, type = "l", col = "black", 
+     main = "Actual vs Forecasted Squared Returns (Pengujian)", 
+     ylab = "Squared Returns", xlab = "Waktu", 
+     ylim = c(ylim_min - 1e-11, ylim_max + 1e-11))  # Mengatur rentang sumbu y
+
+# Tambahkan garis forecast
+lines(sigma_forecast1F, col = "red")
+
+# Tambahkan legenda
+legend("topright", legend = c("Aktual", "Diramalkan"), col = c("black", "red"), lty = 1)
+
+```
+
+
+```{r}
+library(rugarch)
+
+# Gabungkan data pelatihan dan pengujian
+kurs.full <- c(train.kurs[, 2], test.kurs[, 2])
+
+# Cek panjang data penuh
+n_total <- length(kurs.full)
+cat("Total data length: ", n_total, "\n")
+
+# Definisikan model GARCH(1,0)
+garch0F <- ugarchspec(mean.model = list(armaOrder = c(0, 0), include.mean = FALSE),
+                      variance.model = list(model = "sGARCH", garchOrder = c(1, 0)),
+                      distribution.model = "norm")
+
+# Latih model dengan data penuh
+garch0Fa <- ugarchfit(spec = garch0F, data = kurs.full)
+print(garch0Fa)
+
+# Prediksi 20 hari ke depan
+future_forecast <- ugarchforecast(garch0Fa, n.ahead = 20)
+future_sigma <- sigma(future_forecast)
+
+# Plot varians kondisional yang diprediksi untuk 20 hari ke depan
+plot(future_sigma, type = "l", col = "green", main = "Prediksi 20 Hari ke Depan untuk Varians Kondisional", ylab = "Varians", xlab = "Hari")
+
+# Tambahkan varians kondisional yang telah diestimasi untuk seluruh data
+sigma_full <- sigma(garch0Fa)
+lines(sigma_full, col = "blue", type = "l")
+legend("topright", legend = c("Prediksi Masa Depan", "Varians Kondisional"), col = c("green", "blue"), lty = 1)
+
+```
+
+```{r}
+# Memuat pustaka rugarch
+library(rugarch)
+
+# Gabungkan data pelatihan dan pengujian
+kurs.full <- c(train.kurs[, 2], test.kurs[, 2])
+
+# Cek panjang data penuh
+n_total <- length(kurs.full)
+cat("Total data length: ", n_total, "\n")
+
+# Definisikan model GARCH(1,0)
+garch0F <- ugarchspec(mean.model = list(armaOrder = c(0, 0), include.mean = FALSE),
+                      variance.model = list(model = "sGARCH", garchOrder = c(1, 0)),
+                      distribution.model = "norm")
+
+# Latih model dengan data penuh
+garch0Fa <- ugarchfit(spec = garch0F, data = kurs.full)
+print(garch0Fa)
+
+```
+
+
+```{r}
+# Prediksi 30 hari ke depan
+future_forecast <- ugarchforecast(garch0Fa, n.ahead = 30)
+future_sigma <- sigma(future_forecast)
+
+# Varians kondisional yang diprediksi
+future_sigma
+
+# Plot varians kondisional yang diprediksi untuk 30 hari ke depan
+plot(future_sigma, type = "l", col = "red", main = "Prediksi 30 Hari ke Depan untuk Varians Kondisional", ylab = "Varians", xlab = "Hari")
+
+# Tambahkan varians kondisional yang telah diestimasi untuk seluruh data
+sigma_full <- sigma(garch0Fa)
+lines(sigma_full, col = "blue", type = "l")
+legend("topright", legend = c("Prediksi Masa Depan", "Varians Kondisional"), col = c("red", "blue"), lty = 1)
+
+# Plot gabungan antara kurs aktual dan prediksi
+# Buat prediksi kurs berdasarkan varians kondisional yang diprediksi
+future_returns <- fitted(future_forecast)
+future_kurs <- kurs.full[n_total] + cumsum(future_returns)
+
+# Plot kurs aktual dan prediksi
+plot(1:n_total, kurs.full, type = "l", col = "blue", main = "Kurs Aktual dan Prediksi 30 Hari ke Depan", ylab = "Kurs", xlab = "Hari")
+lines((n_total + 1):(n_total + 30), future_kurs, col = "red")
+legend("topright", legend = c("Kurs Aktual", "Prediksi Masa Depan"), col = c("blue", "red"), lty = 2)
+```
+
+```{r}
+# GARCH (1,1)
+library(rugarch)
+
+# Load the training and testing data
+kurs.tr <- train.kurs[, 2]
+kurs.ts <- test.kurs[, 2]
+
+# Check the length of the training data
+n_total <- length(kurs.tr)
+cat("Total data length: ", n_total, "\n")
+
+# Define the number of out-of-sample points for fitting
+n_out <- length(kurs.ts)
+cat("Out-sample data length: ", n_out, "\n")
+
+# Define the GARCH(1,0) model
+garch1Ff <- ugarchspec(mean.model = list(armaOrder = c(0,0), include.mean = FALSE),
+                     variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                     distribution.model = "norm")
+
+# Fit the model using the entire training data
+garch1Faf <- ugarchfit(spec = garch1Ff, data = kurs.tr)
+print(garch1Faf)
+
+# Predict the conditional variances for the training data
+sigma_fitted1Ff <- sigma(garch1Faf)
+
+# Forecast out-of-sample variances
+fore1.kursfull <- ugarchforecast(garch1Faf, n.ahead = n_out)
+sigma_forecast1Ff <- sigma(fore1.kursfull)
+
+# Ensure lengths are consistent
+cat("Length of sigma_fitted: ", length(sigma_fitted1Ff), "\n")
+cat("Length of sigma_forecast: ", length(sigma_forecast1Ff), "\n")
+cat("Length of kurs full.tr: ", length(kurs.tr), "\n")
+
+# Calculate MSE for the training period
+mse_train1Ff <- mean((kurs.tr - sigma_fitted1Ff)^2)
+
+# Calculate MSE for the testing period
+mse_test1Ff <- mean((kurs.ts - sigma_forecast1Ff)^2)
+
+cat("MSE Pelatihan: ", mse_train1Ff, "\n")
+cat("MSE Pengujian: ", mse_test1Ff, "\n")
+
+
+# Plot results
+par(mfrow = c(3, 1))
+plot(sigma_fitted1Ff, type = "l", col = "blue", main = "Varians Kondisional (Pelatihan)", ylab = "Varians", xlab = "Waktu")
+plot(sigma_forecast1Ff, type = "l", col = "red", main = "Forecast Varians Kondisional (Pengujian)", ylab = "Varians", xlab = "Waktu")
+lines(c(rep(NA, length(sigma_fitted1Ff)), sigma_forecast1Ff), col = "red")
+legend("topright", legend = c("Fitted", "Forecasted"), col = c("blue", "red"), lty = 1)
+
+# Optional: Plot actual vs. forecast for the testing period
+plot(kurs.ts, type = "l", col = "black", main = "Actual vs Forecasted Squared Returns (Pengujian)", ylab = "Squared Returns", xlab = "Waktu")
+lines(sigma_forecast1Ff, col = "red")
+legend("topright", legend = c("Actual", "Forecasted"), col = c("black", "red"), lty = 1)
+
+```
+
+```{r}
+length(sigma_fitted1Ff)
+length(sigma_forecast1Ff)
+length(kurs.tr)
+```
+
+```{r}
+#menyimpan nilai fitted dan validasi
+library(foreign)
+fitted.kurs11.full<-write.csv(sigma_fitted1Ff,"D:\\S2 Statistika dan Sains Data\\Tesis\\Persyntax an\\SYNTAX TESIS\\fitted.kurs11.full.csv")
+forecast.kurs11.full<-write.csv(sigma_forecast1Ff,"D:\\S2 Statistika dan Sains Data\\Tesis\\Persyntax an\\SYNTAX TESIS\\forecast.kurs11.full.csv")
+```
+
+```{r}
+plot(garch1Faf,which='all')
+```
